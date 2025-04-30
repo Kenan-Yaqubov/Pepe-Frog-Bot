@@ -159,7 +159,17 @@ def summarize_text(text: str) -> str:
     prompt = f"Summarize the following text in a clear and concise way:\n\n{text}\n\nSummary:"
     return query_huggingface(prompt)
 
+def translate_text(text: str, target_language: str) -> str:
+    prompt = f"Translate the following text to {target_language}. Keep it clear and concise:\n\n{text}"
+    return query_huggingface(prompt)
 
-def translate_text(text: str) -> str:
-    prompt = f"Translate the following text in a clear and concise way:\n\n{text}\n\Translation:"
+
+
+def roast_text(target: str) -> str:
+    prompt = f"Give a short, funny roast for someone named {target}. Keep it playful."
+    return query_huggingface(prompt)
+
+
+def pepe_text(topic: str) -> str:
+    prompt = f"Write a weird and funny fortune about {topic}, like a chaotic magic 8-ball would."
     return query_huggingface(prompt)

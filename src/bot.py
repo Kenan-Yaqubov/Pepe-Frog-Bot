@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import os
 from dotenv import load_dotenv
-from openai_chat import get_joke, query_huggingface, mood, generate_image, get_citation, get_quote, summarize_text, translate_text
+from openai_chat import get_joke, query_huggingface, mood, generate_image, get_citation, get_quote, summarize_text, translate_text, roast_text, pepe_text
 import time
 from collections import defaultdict
 import io
@@ -305,23 +305,51 @@ async def summarize(interaction: discord.Interaction, content: str):
     embed.set_footer(text=f"🤖 Mood: {user_mood}")
     await interaction.followup.send(embed=embed)
 
+@bot.tree.command(name="translate", description="Translate text to a specific language.")
+@app_commands.describe(text="Text to translate", language="Target language")
+async def translate(interaction: discord.Interaction, text: str, language: str):
+    await interaction.response.defer()
+    translated = translate_text(text, language)
+    await interaction.followup.send(f"**Translated to {language}:**\n{translated}")
 
-@bot.tree.command(name="translate", description="🌍 Translate any text to other language.")
-async def translate(interaction: discord.Interaction, content: str):
-    log_command_usage(interaction.user.id, "translate")
+
+
+@bot.tree.command(name="roast", description="🙈 Give Pepe a name, and he'll generate a light-hearted roast.")
+async def roast(interaction: discord.Interaction, content: str):
+    log_command_usage(interaction.user.id, "roast")
     user_mood = get_user_mood(interaction.user.id) or "neutral"
     props = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
 
     await interaction.response.defer()
-    summary = translate_text(content)
+    roast_text_output = roast_text(content)
 
     embed = discord.Embed(
-        title=f"{props['prefix']} Here's your translate",
-        description=summary[:2048],
+        title=f"{props['prefix']} Here's your roast",
+        description=roast_text_output[:2048],
         color=props["color"]
     )
     embed.set_footer(text=f"🤖 Mood: {user_mood}")
     await interaction.followup.send(embed=embed)
+
+
+
+@bot.tree.command(name="pepefortune", description="🍀 Ask Pepe to tell your future—with a silly fortune.")
+async def fortune(interaction: discord.Interaction, content: str):
+    log_command_usage(interaction.user.id, "pepefortune")
+    user_mood = get_user_mood(interaction.user.id) or "neutral"
+    props = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
+
+    await interaction.response.defer()
+    fortune_text = pepe_text(content)
+
+    embed = discord.Embed(
+        title=f"{props['prefix']} Here's your fortune:",
+        description=fortune_text[:2048],
+        color=props["color"]
+    )
+    embed.set_footer(text=f"🤖 Mood: {user_mood}")
+    await interaction.followup.send(embed=embed)
+
 
 
 @bot.tree.command(name="help", description="📚 Get help with commands.")
@@ -363,8 +391,9 @@ async def help(interaction: discord.Interaction, command_name: str = None):
                 "`/quote` — Inspirational quote\n"
                 "`/cite` — Academic citation\n"
                 "`/compliment` — Custom compliment\n"
-                "`/summarize` — Summarize any text\n"
-                "`/explain` — Explain any topic"
+                "`/summarize` — Get a concise summary of text\n"
+                "`/translate` — Translate text to another language\n"
+                "`/explain` — Get a clear explanation of any topic"
             ),
             inline=False
         )
@@ -374,6 +403,8 @@ async def help(interaction: discord.Interaction, command_name: str = None):
             value=(
                 "`/ping` — Check if I'm alive\n"
                 "`/joke` — Get a random joke\n"
+                "`/roast` — Get a light-hearted roast about any topic\n"
+                "`/pepefortune` — Get a silly fortune prediction\n"
                 "`/invite` — Get my invite link"
             ),
             inline=False
