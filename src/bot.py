@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import os
 from dotenv import load_dotenv
-from openai_chat import get_joke, query_huggingface, mood, generate_image, get_citation, get_quote
+from openai_chat import get_joke, query_huggingface, mood, generate_image, get_citation, get_quote, summarize_text, translate_text
 import time
 from collections import defaultdict
 import io
@@ -32,12 +32,12 @@ def is_on_cooldown(user_id, command_name, cooldown_seconds):
 
 
 MOOD_SETTINGS = {
-    "happy": {"color": 0xFEE75C, "prefix": "🌟", "style": "upbeat and positive", "typing_emoji": "✍️"},
-    "sad": {"color": 0x3498DB, "prefix": "☔", "style": "compassionate and gentle", "typing_emoji": "💬"},
-    "angry": {"color": 0xE74C3C, "prefix": "⚡", "style": "calming and diplomatic", "typing_emoji": "✋"},
-    "neutral": {"color": 0x2ECC71, "prefix": "🐸", "style": "neutral but friendly", "typing_emoji": "🤔"},
-    "excited": {"color": 0xE91E63, "prefix": "🚀", "style": "energetic and enthusiastic", "typing_emoji": "⚡"},
-    "anxious": {"color": 0x9B59B6, "prefix": "🧘", "style": "reassuring and clear", "typing_emoji": "🌀"}
+    "happy": {"color": 0xFEE75C, "prefix": "🌟 ", "style": "upbeat and positive", "typing_emoji": "✍️ "},
+    "sad": {"color": 0x3498DB, "prefix": "☔ ", "style": "compassionate and gentle", "typing_emoji": "💬 "},
+    "angry": {"color": 0xE74C3C, "prefix": "⚡ ", "style": "calming and diplomatic", "typing_emoji": "✋ "},
+    "neutral": {"color": 0x2ECC71, "prefix": "🐸 ", "style": "neutral but friendly", "typing_emoji": "🤔 "},
+    "excited": {"color": 0xE91E63, "prefix": "🚀 ", "style": "energetic and enthusiastic", "typing_emoji": "⚡ "},
+    "anxious": {"color": 0x9B59B6, "prefix": "🧘 ", "style": "reassuring and clear", "typing_emoji": "🌀 "}
 }
 
 @bot.event
@@ -81,6 +81,7 @@ async def on_member_join(member):
 async def on_message(message):
     if message.author == bot.user:
         return
+    
     add_user(message.author.id, message.author.name)
 
 # SLASH COMMANDS
@@ -287,6 +288,40 @@ async def explain(interaction: discord.Interaction, topic: str):
     embed.set_footer(text=f"🤖 Mood: {user_mood}")
     await interaction.followup.send(embed=embed)
 
+@bot.tree.command(name="summarize", description="📝 Summarize any text or content.")
+async def summarize(interaction: discord.Interaction, content: str):
+    log_command_usage(interaction.user.id, "summarize")
+    user_mood = get_user_mood(interaction.user.id) or "neutral"
+    props = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
+
+    await interaction.response.defer()
+    summary = summarize_text(content)
+
+    embed = discord.Embed(
+        title=f"{props['prefix']} Here's your summary",
+        description=summary[:2048],
+        color=props["color"]
+    )
+    embed.set_footer(text=f"🤖 Mood: {user_mood}")
+    await interaction.followup.send(embed=embed)
+
+
+@bot.tree.command(name="translate", description="🌍 Translate any text to other language.")
+async def translate(interaction: discord.Interaction, content: str):
+    log_command_usage(interaction.user.id, "translate")
+    user_mood = get_user_mood(interaction.user.id) or "neutral"
+    props = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
+
+    await interaction.response.defer()
+    summary = translate_text(content)
+
+    embed = discord.Embed(
+        title=f"{props['prefix']} Here's your translate",
+        description=summary[:2048],
+        color=props["color"]
+    )
+    embed.set_footer(text=f"🤖 Mood: {user_mood}")
+    await interaction.followup.send(embed=embed)
 
 
 @bot.tree.command(name="help", description="📚 Get help with commands.")
@@ -328,6 +363,7 @@ async def help(interaction: discord.Interaction, command_name: str = None):
                 "`/quote` — Inspirational quote\n"
                 "`/cite` — Academic citation\n"
                 "`/compliment` — Custom compliment\n"
+                "`/summarize` — Summarize any text\n"
                 "`/explain` — Explain any topic"
             ),
             inline=False

@@ -155,3 +155,11 @@ def get_quote(topic: str = None) -> str:
         return f"⚠️ Error fetching quote: {str(e)}"
     
 
+def summarize_text(text: str) -> str:
+    prompt = f"Summarize the following text in a clear and concise way:\n\n{text}\n\nSummary:"
+    return query_huggingface(prompt)
+
+
+def translate_text(text: str) -> str:
+    prompt = f"Translate the following text in a clear and concise way:\n\n{text}\n\Translation:"
+    return query_huggingface(prompt)
