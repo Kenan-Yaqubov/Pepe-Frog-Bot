@@ -1,6 +1,6 @@
 # database.py
 from pymongo import MongoClient, DESCENDING, ASCENDING
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 
@@ -30,10 +30,9 @@ def get_database():
 def initialize_database():
     """Initializes collections and indexes if they don't exist"""
     db = get_database()
-    if not db:
+    if db is None:
         return False
 
-    # List of required collections and their indexes
     collections_config = {
         "users": [
             {"keys": [("user_id", ASCENDING)], "options": {"unique": True}},
@@ -51,15 +50,13 @@ def initialize_database():
 
     try:
         existing_collections = db.list_collection_names()
-        
+
         for collection_name, indexes in collections_config.items():
-            # Create collection if it doesn't exist
             if collection_name not in existing_collections:
                 db[collection_name].insert_one({"__init__": True})
                 db[collection_name].delete_one({"__init__": True})
                 print(f"Created collection: {collection_name}")
-            
-            # Create indexes
+
             current_indexes = db[collection_name].index_information()
             for index in indexes:
                 index_name = "_".join([f"{k}_{v}" for k, v in index["keys"]])
@@ -69,17 +66,15 @@ def initialize_database():
                         **index.get("options", {})
                     )
                     print(f"Created index {index_name} on {collection_name}")
-        
+
         return True
     except Exception as e:
         print(f"Initialization error: {str(e)}")
         return False
 
-# CRUD Operations
 def add_user(user_id: int, username: str):
-    """Adds or updates a user in the database"""
     db = get_database()
-    if db:
+    if db is not None:
         try:
             db.users.update_one(
                 {"user_id": user_id},
@@ -99,14 +94,14 @@ def add_user(user_id: int, username: str):
             return True
         except Exception as e:
             print(f"Error adding user: {str(e)}")
+    else:
+        print("Failed to connect to the database.")
     return False
 
 def log_command_usage(user_id: int, command_name: str):
-    """Logs a command execution"""
     db = get_database()
-    if db:
+    if db is not None:
         try:
-            # Update user activity
             db.users.update_one(
                 {"user_id": user_id},
                 {
@@ -114,8 +109,7 @@ def log_command_usage(user_id: int, command_name: str):
                     "$set": {"last_seen": datetime.now()}
                 }
             )
-            
-            # Update command stats
+
             db.command_usage.update_one(
                 {"user_id": user_id, "command_name": command_name},
                 {
@@ -130,17 +124,14 @@ def log_command_usage(user_id: int, command_name: str):
     return False
 
 def log_user_mood(user_id: int, mood: str):
-    """Records a user's mood"""
     db = get_database()
-    if db:
+    if db is not None:
         try:
-            # Update current mood
             db.users.update_one(
                 {"user_id": user_id},
                 {"$set": {"last_mood": mood}}
             )
-            
-            # Add to mood history
+
             db.user_moods.insert_one({
                 "user_id": user_id,
                 "mood": mood,
@@ -151,30 +142,25 @@ def log_user_mood(user_id: int, mood: str):
             print(f"Error logging mood: {str(e)}")
     return False
 
-# Query Functions
 def get_user_stats(user_id: int) -> dict:
-    """Retrieves comprehensive user statistics"""
     db = get_database()
-    if not db:
+    if db is None:
         return None
 
     try:
-        # Base user info
         user = db.users.find_one(
             {"user_id": user_id},
-            {"_id": 0, "username": 1, "message_count": 1, 
+            {"_id": 0, "username": 1, "message_count": 1,
              "last_mood": 1, "join_date": 1, "last_seen": 1}
         )
         if not user:
             return None
 
-        # Command statistics
         top_commands = list(db.command_usage.find(
             {"user_id": user_id},
             {"_id": 0, "command_name": 1, "usage_count": 1, "last_used": 1}
         ).sort("usage_count", DESCENDING).limit(5))
 
-        # Mood history
         mood_history = list(db.user_moods.find(
             {"user_id": user_id},
             {"_id": 0, "mood": 1, "detected_at": 1}
@@ -190,13 +176,11 @@ def get_user_stats(user_id: int) -> dict:
         return None
 
 def get_server_stats() -> dict:
-    """Gets aggregate server statistics"""
     db = get_database()
-    if not db:
+    if db is None:
         return None
 
     try:
-        # User statistics
         user_stats = db.users.aggregate([
             {
                 "$group": {
@@ -207,14 +191,12 @@ def get_server_stats() -> dict:
             }
         ]).next()
 
-        # Most active user
         most_active = db.users.find_one(
             {},
             {"_id": 0, "user_id": 1, "username": 1, "message_count": 1},
             sort=[("message_count", DESCENDING)]
         )
 
-        # Popular commands
         popular_commands = list(db.command_usage.aggregate([
             {"$group": {
                 "_id": "$command_name",
@@ -234,26 +216,42 @@ def get_server_stats() -> dict:
         print(f"Error getting server stats: {str(e)}")
         return None
 
-
 def cleanup_database(days_old: int = 30):
-    """Cleans up old records"""
     db = get_database()
-    if db:
+    if db is not None:
         try:
             cutoff_date = datetime.now() - timedelta(days=days_old)
-            
-            # Clean old mood records
+
             result_moods = db.user_moods.delete_many({
                 "detected_at": {"$lt": cutoff_date}
             })
-            
-            # Clean old command logs
+
             result_commands = db.command_usage.delete_many({
                 "last_used": {"$lt": cutoff_date}
             })
-            
+
             print(f"Cleaned up: {result_moods.deleted_count} mood records, {result_commands.deleted_count} command logs")
             return True
         except Exception as e:
             print(f"Cleanup error: {str(e)}")
+    return False
+
+def get_user_mood(user_id: int):
+    db = get_database()
+    if db is not None:
+        user = db.users.find_one({"user_id": user_id}, {"last_mood": 1})
+        return user.get("last_mood") if user else None
+    return None
+
+def reset_user_mood(user_id: int):
+    db = get_database()
+    if db is not None:
+        try:
+            db.users.update_one(
+                {"user_id": user_id},
+                {"$unset": {"last_mood": ""}}
+            )
+            return True
+        except Exception as e:
+            print(f"Error resetting mood: {str(e)}")
     return False

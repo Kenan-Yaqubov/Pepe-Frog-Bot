@@ -57,24 +57,14 @@ def query_huggingface(prompt: str) -> str:
 emotion_class = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base")
 
 
-def mood(ctx) -> str:
-    """Detects the mood from the message content."""
-    
-    if ctx.author.id in ctx.bot.user_moods:
-        return ctx.bot.user_moods[ctx.author.id]
-    
-    message = ctx.message.content
-    
-    if message.startswith('!ask'):
-        message = message[4:].strip()
-    
-    if len(message) < 5:
+def mood(text: str) -> str:
+    """Detects mood from text only (no ctx dependency)."""
+    if len(text) < 5:
         return "neutral"
-    
+
     try:
-        emotion = emotion_class(message)
+        emotion = emotion_class(text)
         label = emotion[0]['label'].lower()
-        
         mood_mapping = {
             'anger': 'angry',
             'disgust': 'angry',
@@ -84,11 +74,11 @@ def mood(ctx) -> str:
             'sadness': 'sad',
             'surprise': 'excited'
         }
-        
         return mood_mapping.get(label, 'neutral')
     except Exception as e:
         print(f"Error detecting mood: {e}")
         return "neutral"
+
 
 
 async def generate_image(prompt: str):

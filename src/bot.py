@@ -13,11 +13,11 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 bot.remove_command("help")
 
-MONGO_URL = os.getenv("MONGO_URL")
-mongo_client = MongoClient(MONGO_URL)
-db = mongo_client["Pepe_bot"]
-user_moods_collection = db["user_moods"]
-user_stats_collection = db["user_stats"]
+from database import (
+    add_user, log_command_usage, log_user_mood,
+    get_user_stats, get_server_stats, reset_user_mood, get_user_mood
+)
+
 
 MOOD_SETTINGS = {
     "happy": {"color": 0xFEE75C, "prefix": "🌟", "style": "upbeat and positive", "typing_emoji": "✍️"},
@@ -27,29 +27,6 @@ MOOD_SETTINGS = {
     "excited": {"color": 0xE91E63, "prefix": "🚀", "style": "energetic and enthusiastic", "typing_emoji": "⚡"},
     "anxious": {"color": 0x9B59B6, "prefix": "🧘", "style": "reassuring and clear", "typing_emoji": "🌀"}
 }
-
-# ========== DATABASE HELPERS ==========
-
-async def get_user_mood(user_id):
-    user_data = user_moods_collection.find_one({"_id": user_id})
-    return user_data["mood"] if user_data else None
-
-async def set_user_mood(user_id, mood):
-    user_moods_collection.update_one(
-        {"_id": user_id},
-        {"$set": {"mood": mood}},
-        upsert=True
-    )
-
-async def reset_user_mood(user_id):
-    user_moods_collection.delete_one({"_id": user_id})
-
-async def update_user_stats(user_id, command_name):
-    user_stats_collection.update_one(
-        {"_id": user_id},
-        {"$inc": {"commands_used": 1, f"commands.{command_name}": 1}},
-        upsert=True
-    )
 
 # ========== EVENTS ==========
 
@@ -61,6 +38,8 @@ async def on_ready():
 @bot.event
 async def on_member_join(member):
     try:
+        reset_user_mood(member.id)
+        add_user(member.id, member.name) 
         channel = member.guild.text_channels[0]
         
         if not channel.permissions_for(member.guild.me).send_messages:
@@ -102,21 +81,17 @@ async def on_member_join(member):
             await member.send(embed=dm_embed)
         except discord.Forbidden:
             pass
-            
+
     except Exception as e:
         print(f"Error sending welcome message: {e}")
+        
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
-    # Update stats: messages sent
-    user_stats_collection.update_one(
-        {"_id": message.author.id},
-        {"$inc": {"messages_sent": 1}},
-        upsert=True
-    )
-
+    add_user(message.author.id, message.author.name)
+    
     if "hello bot" in message.content.lower():
         await message.channel.send(f"🐸 Hello {message.author.name}! How can I assist you today?")
 
@@ -126,20 +101,45 @@ async def on_message(message):
 
 @bot.command(help="🏓 Just checking if I'm alive.")
 async def ping(ctx):
-    await update_user_stats(ctx.author.id, "ping")
+    log_command_usage(ctx.author.id, "ping")
     await ctx.send('Pong!')
 
 @bot.command(help="😁 Need a laugh? Pepe delivers a random (maybe terrible) joke.")
 async def joke(ctx):
-    await update_user_stats(ctx.author.id, "joke")
+    log_command_usage(ctx.author.id, "joke")
     joke_text = get_joke()
     await ctx.send(joke_text)
 
+
+
+@bot.command(help="📖 Learn more about Pepe AI.")
+async def about(ctx):
+    embed = discord.Embed(
+        title="🐸 About Pepe AI",
+        description=(
+            "Pepe AI is your friendly, AI-powered assistant here to make your Discord experience more fun and interactive! "
+            "From mood management to generating art and even sharing random jokes, Pepe is always ready to assist.\n\n"
+            "**Key Features:**\n"
+            "• **Mood Management** — Set your mood and get responses tailored to it.\n"
+            "• **AI Fun** — Ask Pepe anything, generate AI art, and more.\n"
+            "• **User Stats** — Track your messages and command usage.\n"
+            "• **Server Integration** — Easily add Pepe to your server and enjoy all the features.\n\n"
+            "Pepe AI is here to keep your server fun and engaging! 🎉"
+        ),
+        color=0x00BFFF
+    )
+    embed.set_footer(
+        text="🐸 Frogs and AI — Together at last! • Made with lots of love and memes 💖"
+    )
+    await ctx.send(embed=embed)
+
+
+
 @bot.command(help="💬 Ask Pepe anything.")
 async def ask(ctx, *, question):
-    await update_user_stats(ctx.author.id, "ask")
+    log_command_usage(ctx.author.id, "ask")
     try:
-        user_mood = await get_user_mood(ctx.author.id) or "neutral"
+        user_mood = get_user_mood(ctx.author.id) or mood(question)
         properties = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
         
         await ctx.send('🐸 Pepe is thinking...')
@@ -157,10 +157,11 @@ async def ask(ctx, *, question):
 
     except Exception as e:
         await ctx.send(f"🐸 Oops: {str(e)}")
+        
 
 @bot.command(help="🎨 Turn your words into art!")
 async def image(ctx, *, prompt):
-    await update_user_stats(ctx.author.id, "image")
+    log_command_usage(ctx.author.id, "image")
     try:
         msg = await ctx.send("🎨 Pepe is painting your image...")
         image_data = await generate_image(prompt)
@@ -202,7 +203,7 @@ async def invite(ctx):
 
 @bot.command(help="🎭 Set Pepe's mood.")
 async def setmood(ctx, mood_type: str = None):
-    await update_user_stats(ctx.author.id, "setmood")
+    log_command_usage(ctx.author.id, "setmood")
     valid_moods = list(MOOD_SETTINGS.keys())
 
     if not mood_type:
@@ -214,20 +215,20 @@ async def setmood(ctx, mood_type: str = None):
         await ctx.send(f"Invalid mood! Choose from: {', '.join(valid_moods)}")
         return
 
-    await set_user_mood(ctx.author.id, mood_type)
+    log_user_mood(ctx.author.id, mood_type)
     props = MOOD_SETTINGS[mood_type]
     await ctx.send(f"{props['prefix']} Mood set to **{mood_type}**!")
 
 @bot.command(help="🔄 Reset mood to auto-detect.")
-async def resetmood(ctx):
-    await update_user_stats(ctx.author.id, "resetmood")
-    await reset_user_mood(ctx.author.id)
+async def resetmood(ctx)    :
+    log_command_usage(ctx.author.id, "resetmood")
+    reset_user_mood(ctx.author.id)
     await ctx.send("🔄 Mood auto-detection re-enabled!")
 
 @bot.command(help="😊 Check your mood setting.")
 async def mymood(ctx):
-    await update_user_stats(ctx.author.id, "mymood")
-    current_mood = await get_user_mood(ctx.author.id)
+    log_command_usage(ctx.author.id, "mymood")
+    current_mood = get_user_mood(ctx.author.id)
     if current_mood:
         props = MOOD_SETTINGS[current_mood]
         await ctx.send(f"{props['prefix']} Your mood is set to **{current_mood}**")
@@ -235,58 +236,75 @@ async def mymood(ctx):
         await ctx.send("🐸 Mood is auto-detected based on your messages!")
 
 @bot.command(help="🧹 Delete all messages in channel.")
-async def clear(ctx):
-    await update_user_stats(ctx.author.id, "clear")
-    await ctx.send("🧹 Cleaning...")
-    deleted = await ctx.channel.purge(limit=None, check=lambda m: not m.pinned)
-    await ctx.send(f"💥 Deleted {len(deleted)} messages.", delete_after=5)
+@commands.has_permissions(manage_messages=True)
+async def clear(ctx, amount: int = 100):
+    log_command_usage(ctx.author.id, "clear")
+    await ctx.channel.purge(limit=amount + 1)
+    confirmation = await ctx.send(f"🧹 Deleted {amount} messages.")
+    await asyncio.sleep(3)
+    await confirmation.delete()
 
 @bot.command(help="📊 View your detailed usage stats.")
 async def stats(ctx):
-    await update_user_stats(ctx.author.id, "stats")
-    stats = user_stats_collection.find_one({"_id": ctx.author.id}) or {}
-    commands = stats.get("commands", {})
-    messages_sent = stats.get("messages_sent", 0)
-    commands_used = stats.get("commands_used", 0)
-
-    # Calculate Top 3 commands
-    top_commands = sorted(commands.items(), key=lambda item: item[1], reverse=True)[:3]
-    top_commands_display = "\n".join([f"• `{cmd}` used **{count}** times" for cmd, count in top_commands]) if top_commands else "No commands yet."
-
-    # Mood
-    current_mood = await get_user_mood(ctx.author.id) or "Auto-detecting"
+    log_command_usage(ctx.author.id, "stats")
+    user_data = get_user_stats(ctx.author.id)  # From database.py
+    
+    if not user_data:
+        await ctx.send("🐸 No stats found. Start chatting!")
+        return
 
     embed = discord.Embed(
         title=f"📊 Stats for {ctx.author.name}",
         color=0x00BFFF,
-        description="Here's your journey with Pepe AI:"
+        description="Here's your activity with Pepe AI:"
     )
-    embed.set_thumbnail(url=ctx.author.display_avatar.url)
-    embed.add_field(name="💬 Messages Sent", value=f"**{messages_sent}** messages", inline=True)
-    embed.add_field(name="🧩 Commands Used", value=f"**{commands_used}** commands", inline=True)
-    embed.add_field(name="🎭 Current Mood", value=f"**{current_mood}**", inline=True)
-    embed.add_field(name="🏆 Top Commands", value=top_commands_display, inline=False)
-    embed.set_footer(text="🐸 Pepe AI • Keep interacting to unlock hidden titles!")
+    
+    # Updated fields using database.py structure
+    embed.add_field(name="💬 Messages", value=user_data.get("message_count", 0))
+    embed.add_field(name="📅 Join Date", value=user_data["join_date"].strftime("%Y-%m-%d"))
+    
+    if user_data.get("top_commands"):
+        top_cmds = "\n".join(
+            f"• `{cmd['command_name']}`: {cmd['usage_count']}x"
+            for cmd in user_data["top_commands"]
+        )
+        embed.add_field(name="🏆 Top Commands", value=top_cmds, inline=False)
+    
+    await ctx.send(embed=embed)
+
+
+@bot.command(help="📈 Server statistics (Admin)")
+async def serverstats(ctx):
+    stats = get_server_stats()
+    embed = discord.Embed(title="📊 Server Stats", color=0x9B59B6)
+    
+    embed.add_field(name="👥 Total Users", value=stats["total_users"])
+    embed.add_field(name="💬 Total Messages", value=stats["total_messages"])
+    
+    if stats.get("most_active_user"):
+        user = stats["most_active_user"]
+        embed.add_field(name="🏆 Most Active", 
+                      value=f"{user['username']} ({user['message_count']} messages)")
     
     await ctx.send(embed=embed)
 
 
 @bot.command(help="📜 Get a random quote (optionally on a specific topic)")
 async def quote(ctx, *, topic=None):
-    await update_user_stats(ctx.author.id, "quote")
+    log_command_usage(ctx.author.id, "quote")
     quote_text = get_quote(topic)
     await ctx.send(quote_text)
 
 @bot.command(help="📚 Get an academic citation on a topic")
 async def cite(ctx, *, topic):
-    await update_user_stats(ctx.author.id, "cite")
+    log_command_usage(ctx.author.id, "cite")
     citation = get_citation(topic)
     await ctx.send(citation)
 
 @bot.command(help="💖 Receive a personalized compliment")
 async def compliment(ctx, *, request=None):
-    await update_user_stats(ctx.author.id, "compliment")
-    user_mood = await get_user_mood(ctx.author.id) or "neutral"
+    log_command_usage(ctx.author.id, "compliment")
+    user_mood = get_user_mood(ctx.author.id) or "neutral"
     properties = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
     
     await ctx.send('🥰 Pepe is thinking of something nice to say...')
