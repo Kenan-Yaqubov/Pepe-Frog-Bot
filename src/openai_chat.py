@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from transformers import pipeline
 import aiohttp
 import asyncio
-from bs4 import BeautifulSoup
 load_dotenv()
 
 
@@ -106,38 +105,51 @@ async def generate_image(prompt: str):
         print(f"Error in generate_image: {str(e)}")
         return None
 
-
 def get_citation(topic: str) -> str:
     """Fetches academic citations from Crossref"""
     try:
         url = f"https://api.crossref.org/works?query={topic.replace(' ', '+')}&rows=3"
-        headers = {'User-Agent': 'YourBot/1.0 (mail@example.com)'}  # Required
+        headers = {'User-Agent': 'PepeBot/1.0 (your-email@example.com)'}  # Use real or dummy email
         
         response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            return f"⚠️ Crossref error: {response.status_code}"
+
         data = response.json()
-        
+        items = data.get('message', {}).get('items', [])
+        if not items:
+            return "⚠️ No academic sources found for that topic."
+
         citations = []
-        for item in data['message']['items']:
+        for item in items:
             title = item.get('title', ['Untitled'])[0]
             doi = item.get('DOI', 'No DOI')
             link = f"https://doi.org/{doi}"
             citations.append(f"**{title}**\n{link}")
-            
-        return "\n\n".join(citations) if citations else "No citations found"
+
+        return "\n\n".join(citations)
     except Exception as e:
         return f"⚠️ Error fetching citations: {str(e)}"
 
 
 def get_quote(topic: str = None) -> str:
-    """Fetches a random quote (or topic-based if supported)"""
+    """Fetches a random inspirational quote or a fallback if topic-based filtering isn't supported."""
     try:
-        url = "https://api.quotable.io/random"
-        if topic:
-            url += f"?tags={topic.lower().replace(' ', '-')}"
-        
+        url = "https://zenquotes.io/api/quotes"
         response = requests.get(url)
+
+        if response.status_code != 200:
+            return "⚠️ Couldn't fetch a quote right now."
+
         data = response.json()
-        
-        return f'"{data["content"]}" — {data["author"]}'
+        quotes = data if isinstance(data, list) else []
+
+        if topic:
+            filtered = [q for q in quotes if topic.lower() in q["q"].lower() or topic.lower() in q["a"].lower()]
+            quote = random.choice(filtered) if filtered else random.choice(quotes)
+        else:
+            quote = random.choice(quotes)
+
+        return f'"{quote["q"]}" — {quote["a"]}'
     except Exception as e:
         return f"⚠️ Error fetching quote: {str(e)}"

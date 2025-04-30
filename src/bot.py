@@ -1,23 +1,21 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 import os
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from openai_chat import get_joke, query_huggingface, mood, generate_image, get_citation, get_quote
-import asyncio
 import io
-
-load_dotenv()
-
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
-bot.remove_command("help")
 
 from database import (
     add_user, log_command_usage, log_user_mood,
     get_user_stats, get_server_stats, reset_user_mood, get_user_mood
 )
 
+load_dotenv()
+
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 MOOD_SETTINGS = {
     "happy": {"color": 0xFEE75C, "prefix": "🌟", "style": "upbeat and positive", "typing_emoji": "✍️"},
@@ -28,413 +26,317 @@ MOOD_SETTINGS = {
     "anxious": {"color": 0x9B59B6, "prefix": "🧘", "style": "reassuring and clear", "typing_emoji": "🌀"}
 }
 
-# ========== EVENTS ==========
-
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user}!')
-
+    print(f"Logged in as {bot.user}")
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} slash commands")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
 
 @bot.event
 async def on_member_join(member):
     try:
         reset_user_mood(member.id)
-        add_user(member.id, member.name) 
+        add_user(member.id, member.name)
         channel = member.guild.text_channels[0]
-        
         if not channel.permissions_for(member.guild.me).send_messages:
             return
-            
+
         embed = discord.Embed(
             title=f"🐸 Welcome to {member.guild.name}, {member.name}!",
             description=(
                 "I'm Pepe, your friendly AI assistant!\n\n"
                 "Here are some things you can do:\n"
-                "• Use `!help` to see all commands\n"
-                "• Try `!ask` to ask me anything\n"
-                "• Need a laugh? Use `!joke`\n"
-                "• Set your mood with `!setmood`\n\n"
+                "• Use `/help` to see all commands\n"
+                "• Try `/ask` to ask me anything\n"
+                "• Need a laugh? Use `/joke`\n"
+                "• Set your mood with `/setmood`\n\n"
                 "Enjoy your stay! 🎉"
             ),
             color=0x2ECC71
         )
-        
         if member.guild.icon:
             embed.set_thumbnail(url=member.guild.icon.url)
-        
-        welcome_msg = await channel.send(embed=embed)
-        await welcome_msg.add_reaction("🐸")
-        
-        try:
-            dm_embed = discord.Embed(
-                title=f"Thanks for joining {member.guild.name}!",
-                description=(
-                    "Here are some quick tips:\n"
-                    "• My prefix is `!`\n"
-                    "• Try `!image` to generate AI art\n"
-                    "• Use `!stats` to track your usage\n"
-                    "• Need help? Just use `!help`\n\n"
-                    "See you in the server! 👋"
-                ),
-                color=0x9B59B6
-            )
-            await member.send(embed=dm_embed)
-        except discord.Forbidden:
-            pass
-
+        await channel.send(embed=embed)
     except Exception as e:
         print(f"Error sending welcome message: {e}")
-        
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
-
     add_user(message.author.id, message.author.name)
-    
-    if "hello bot" in message.content.lower():
-        await message.channel.send(f"🐸 Hello {message.author.name}! How can I assist you today?")
 
-    await bot.process_commands(message)
+# SLASH COMMANDS
 
-# ========== COMMANDS ==========
+@bot.tree.command(name="ping", description="🏓 Check if Pepe is alive.")
+async def ping(interaction: discord.Interaction):
+    log_command_usage(interaction.user.id, "ping")
+    await interaction.response.send_message("Pong!")
 
-@bot.command(help="🏓 Just checking if I'm alive.")
-async def ping(ctx):
-    log_command_usage(ctx.author.id, "ping")
-    await ctx.send('Pong!')
-
-@bot.command(help="😁 Need a laugh? Pepe delivers a random (maybe terrible) joke.")
-async def joke(ctx):
-    log_command_usage(ctx.author.id, "joke")
+@bot.tree.command(name="joke", description="😁 Need a laugh? Pepe delivers a random (bad) joke.")
+async def joke(interaction: discord.Interaction):
+    log_command_usage(interaction.user.id, "joke")
     joke_text = get_joke()
-    await ctx.send(joke_text)
+    await interaction.response.send_message(joke_text)
 
-
-
-@bot.command(help="📖 Learn more about Pepe AI.")
-async def about(ctx):
+@bot.tree.command(name="about", description="📖 Learn more about Pepe AI.")
+async def about(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🐸 About Pepe AI",
         description=(
             "Pepe AI is your friendly, AI-powered assistant here to make your Discord experience more fun and interactive! "
             "From mood management to generating art and even sharing random jokes, Pepe is always ready to assist.\n\n"
             "**Key Features:**\n"
-            "• **Mood Management** — Set your mood and get responses tailored to it.\n"
-            "• **AI Fun** — Ask Pepe anything, generate AI art, and more.\n"
-            "• **User Stats** — Track your messages and command usage.\n"
-            "• **Server Integration** — Easily add Pepe to your server and enjoy all the features.\n\n"
+            "• Mood Management\n"
+            "• AI Chat & Art\n"
+            "• User Stats\n"
+            "• Server Friendly\n\n"
             "Pepe AI is here to keep your server fun and engaging! 🎉"
         ),
         color=0x00BFFF
     )
-    embed.set_footer(
-        text="🐸 Frogs and AI — Together at last! • Made with lots of love and memes 💖"
-    )
-    await ctx.send(embed=embed)
+    embed.set_footer(text="🐸 Frogs and AI — Together at last!")
+    await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="ask", description="💬 Ask Pepe anything.")
+async def ask(interaction: discord.Interaction, question: str):
+    log_command_usage(interaction.user.id, "ask")
+    user_mood = get_user_mood(interaction.user.id) or mood(question)
+    props = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
 
-
-@bot.command(help="💬 Ask Pepe anything.")
-async def ask(ctx, *, question):
-    log_command_usage(ctx.author.id, "ask")
-    try:
-        user_mood = get_user_mood(ctx.author.id) or mood(question)
-        properties = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
-        
-        await ctx.send('🐸 Pepe is thinking...')
-        async with ctx.typing():
-            await asyncio.sleep(1)
-            reply = query_huggingface(f'Answer in a {properties["style"]} tone. {question}. Keep it short.')
-        
-        embed = discord.Embed(
-            title=f"{properties['prefix']} Pepe's Response",
-            description=reply[:2048],
-            color=properties["color"]
-        )
-        embed.set_footer(text=f"🤖 Mood: {user_mood}")
-        await ctx.send(embed=embed)
-
-    except Exception as e:
-        await ctx.send(f"🐸 Oops: {str(e)}")
-        
-
-@bot.command(help="🎨 Turn your words into art!")
-async def image(ctx, *, prompt):
-    log_command_usage(ctx.author.id, "image")
-    try:
-        msg = await ctx.send("🎨 Pepe is painting your image...")
-        image_data = await generate_image(prompt)
-        
-        if image_data is None:
-            await msg.edit(content="❌ Couldn't generate image. Try again!")
-            return
-
-        with io.BytesIO(image_data) as image_binary:
-            await ctx.send(file=discord.File(image_binary, "pepe_art.png"))
-        await msg.delete()
-
-    except Exception as e:
-        await ctx.send(f"🐸 Error: {str(e)}")
-
-
-@bot.command(help="🔗 Get an invite link to add me to your server")
-async def invite(ctx):
-    permissions = 277025770560
-    
+    await interaction.response.defer()
+    reply = query_huggingface(f"Answer in a {props['style']} tone. {question}. Keep it short.")
     embed = discord.Embed(
-        title="🔗 Invite Pepe AI to Your Server",
-        description="Click below to add me with recommended permissions:",
-        color=0x2ECC71
+        title=f"{props['prefix']} Pepe's Response",
+        description=reply[:2048],
+        color=props["color"]
     )
-    
+    embed.set_footer(text=f"🤖 Mood: {user_mood}")
+    await interaction.followup.send(embed=embed)
+
+@bot.tree.command(name="image", description="🎨 Turn your words into AI art!")
+async def image(interaction: discord.Interaction, prompt: str):
+    log_command_usage(interaction.user.id, "image")
+    await interaction.response.defer()
+    image_data = await generate_image(prompt)
+
+    if not image_data:
+        await interaction.followup.send("❌ Couldn't generate image.")
+        return
+
+    with io.BytesIO(image_data) as image_binary:
+        await interaction.followup.send(file=discord.File(image_binary, "pepe_art.png"))
+
+@bot.tree.command(name="invite", description="🔗 Invite Pepe AI to your server.")
+async def invite(interaction: discord.Interaction):
+    permissions = 277025770560
     invite_url = f"https://discord.com/oauth2/authorize?client_id={bot.user.id}&permissions={permissions}&scope=bot%20applications.commands"
-    
-    embed.add_field(
-        name="Recommended Permissions",
-        value="*• Read Messages\n• Send Messages\n• Embed Links\n• Attach Files\n• Manage Messages\n• Read Message History*",
-        inline=False
-    )
-    
     view = discord.ui.View()
     view.add_item(discord.ui.Button(label="Invite Me", url=invite_url, emoji="➕"))
-    
-    await ctx.send(embed=embed, view=view)
-
-@bot.command(help="🎭 Set Pepe's mood.")
-async def setmood(ctx, mood_type: str = None):
-    log_command_usage(ctx.author.id, "setmood")
-    valid_moods = list(MOOD_SETTINGS.keys())
-
-    if not mood_type:
-        await ctx.send(f"Available moods: {', '.join(valid_moods)}. Example: `!setmood happy`")
-        return
-
-    mood_type = mood_type.lower()
-    if mood_type not in valid_moods:
-        await ctx.send(f"Invalid mood! Choose from: {', '.join(valid_moods)}")
-        return
-
-    log_user_mood(ctx.author.id, mood_type)
-    props = MOOD_SETTINGS[mood_type]
-    await ctx.send(f"{props['prefix']} Mood set to **{mood_type}**!")
-
-@bot.command(help="🔄 Reset mood to auto-detect.")
-async def resetmood(ctx)    :
-    log_command_usage(ctx.author.id, "resetmood")
-    reset_user_mood(ctx.author.id)
-    await ctx.send("🔄 Mood auto-detection re-enabled!")
-
-@bot.command(help="😊 Check your mood setting.")
-async def mymood(ctx):
-    log_command_usage(ctx.author.id, "mymood")
-    current_mood = get_user_mood(ctx.author.id)
-    if current_mood:
-        props = MOOD_SETTINGS[current_mood]
-        await ctx.send(f"{props['prefix']} Your mood is set to **{current_mood}**")
-    else:
-        await ctx.send("🐸 Mood is auto-detected based on your messages!")
-
-@bot.command(help="🧹 Delete all messages in channel.")
-@commands.has_permissions(manage_messages=True)
-async def clear(ctx, amount: int = 100):
-    log_command_usage(ctx.author.id, "clear")
-    await ctx.channel.purge(limit=amount + 1)
-    confirmation = await ctx.send(f"🧹 Deleted {amount} messages.")
-    await asyncio.sleep(3)
-    await confirmation.delete()
-
-@bot.command(help="📊 View your detailed usage stats.")
-async def stats(ctx):
-    log_command_usage(ctx.author.id, "stats")
-    user_data = get_user_stats(ctx.author.id)  # From database.py
-    
-    if not user_data:
-        await ctx.send("🐸 No stats found. Start chatting!")
-        return
-
     embed = discord.Embed(
-        title=f"📊 Stats for {ctx.author.name}",
-        color=0x00BFFF,
-        description="Here's your activity with Pepe AI:"
+        title="🔗 Invite Pepe AI",
+        description="Click below to invite Pepe with recommended permissions.",
+        color=0x2ECC71
     )
-    
-    # Updated fields using database.py structure
+    await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="setmood", description="🎭 Set your current mood.")
+async def setmood(interaction: discord.Interaction, mood_type: str):
+    log_command_usage(interaction.user.id, "setmood")
+    mood_type = mood_type.lower()
+    if mood_type not in MOOD_SETTINGS:
+        await interaction.response.send_message(f"Invalid mood! Choose from: {', '.join(MOOD_SETTINGS)}")
+        return
+    log_user_mood(interaction.user.id, mood_type)
+    props = MOOD_SETTINGS[mood_type]
+    await interaction.response.send_message(f"{props['prefix']} Mood set to **{mood_type}**!")
+
+@bot.tree.command(name="resetmood", description="🔄 Reset mood to auto-detection.")
+async def resetmood(interaction: discord.Interaction):
+    log_command_usage(interaction.user.id, "resetmood")
+    reset_user_mood(interaction.user.id)
+    await interaction.response.send_message("🔄 Mood auto-detection re-enabled!")
+
+@bot.tree.command(name="mymood", description="😊 Check your current mood.")
+async def mymood(interaction: discord.Interaction):
+    log_command_usage(interaction.user.id, "mymood")
+    current = get_user_mood(interaction.user.id)
+    if current:
+        props = MOOD_SETTINGS[current]
+        await interaction.response.send_message(f"{props['prefix']} Your mood is set to **{current}**")
+    else:
+        await interaction.response.send_message("🐸 Mood is auto-detected!")
+
+@bot.tree.command(name="stats", description="📊 View your usage stats.")
+async def stats(interaction: discord.Interaction):
+    log_command_usage(interaction.user.id, "stats")
+    user_data = get_user_stats(interaction.user.id)
+    if not user_data:
+        await interaction.response.send_message("🐸 No stats yet.")
+        return
+
+    embed = discord.Embed(title=f"📊 Stats for {interaction.user.name}", color=0x00BFFF)
     embed.add_field(name="💬 Messages", value=user_data.get("message_count", 0))
     embed.add_field(name="📅 Join Date", value=user_data["join_date"].strftime("%Y-%m-%d"))
-    
     if user_data.get("top_commands"):
-        top_cmds = "\n".join(
-            f"• `{cmd['command_name']}`: {cmd['usage_count']}x"
-            for cmd in user_data["top_commands"]
-        )
-        embed.add_field(name="🏆 Top Commands", value=top_cmds, inline=False)
-    
-    await ctx.send(embed=embed)
+        top = "\n".join(f"• `{c['command_name']}`: {c['usage_count']}x" for c in user_data["top_commands"])
+        embed.add_field(name="🏆 Top Commands", value=top, inline=False)
+    await interaction.response.send_message(embed=embed)
 
-
-@bot.command(help="📈 Server statistics (Admin)")
-async def serverstats(ctx):
+@bot.tree.command(name="serverstats", description="📈 View server-wide stats.")
+async def serverstats(interaction: discord.Interaction):
     stats = get_server_stats()
     embed = discord.Embed(title="📊 Server Stats", color=0x9B59B6)
-    
     embed.add_field(name="👥 Total Users", value=stats["total_users"])
     embed.add_field(name="💬 Total Messages", value=stats["total_messages"])
-    
     if stats.get("most_active_user"):
-        user = stats["most_active_user"]
-        embed.add_field(name="🏆 Most Active", 
-                      value=f"{user['username']} ({user['message_count']} messages)")
-    
-    await ctx.send(embed=embed)
+        u = stats["most_active_user"]
+        embed.add_field(name="🏆 Most Active", value=f"{u['username']} ({u['message_count']} messages)")
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="quote", description="📜 Get an inspirational quote.")
+async def quote(interaction: discord.Interaction, topic: str = None):
+    log_command_usage(interaction.user.id, "quote")
+    text = get_quote(topic)
+
+    if text.startswith("⚠️"):
+        await interaction.response.send_message(text)
+        return
+
+    if "—" in text:
+        quote_text, author = map(str.strip, text.split("—", 1))
+    else:
+        quote_text = text
+        author = "Unknown"
+
+    embed = discord.Embed(
+        title="📜 Inspirational Quote",
+        description=quote_text,
+        color=0x95a5a6
+    )
+    embed.set_footer(text=f"— {author}")
+    await interaction.response.send_message(embed=embed)
 
 
-@bot.command(help="📜 Get a random quote (optionally on a specific topic)")
-async def quote(ctx, *, topic=None):
-    log_command_usage(ctx.author.id, "quote")
-    quote_text = get_quote(topic)
-    await ctx.send(quote_text)
-
-@bot.command(help="📚 Get an academic citation on a topic")
-async def cite(ctx, *, topic):
-    log_command_usage(ctx.author.id, "cite")
+@bot.tree.command(name="cite", description="📚 Get an academic citation.")
+async def cite(interaction: discord.Interaction, topic: str):
+    log_command_usage(interaction.user.id, "cite")
     citation = get_citation(topic)
-    await ctx.send(citation)
+    await interaction.response.send_message(citation)
 
-@bot.command(help="💖 Receive a personalized compliment")
-async def compliment(ctx, *, request=None):
-    log_command_usage(ctx.author.id, "compliment")
-    user_mood = get_user_mood(ctx.author.id) or "neutral"
-    properties = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
-    
-    await ctx.send('🥰 Pepe is thinking of something nice to say...')
-    async with ctx.typing():
-        await asyncio.sleep(1)
-        prompt = f"Give a {properties['style']} compliment"
-        if request:
-            prompt += f" related to: {request}"
-        prompt += ". Keep it under 1 sentence."
-        reply = query_huggingface(prompt)
-    
+@bot.tree.command(name="compliment", description="💖 Receive a compliment!")
+async def compliment(interaction: discord.Interaction, request: str = None):
+    log_command_usage(interaction.user.id, "compliment")
+    user_mood = get_user_mood(interaction.user.id) or "neutral"
+    props = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
+    await interaction.response.defer()
+    prompt = f"Give a {props['style']} compliment"
+    if request:
+        prompt += f" related to: {request}"
+    prompt += ". Keep it under 1 sentence."
+    reply = query_huggingface(prompt)
     embed = discord.Embed(
-        description=f"💖 **Compliment for {ctx.author.name}:**\n\n{reply}",
-        color=properties["color"]
+        description=f"💖 **Compliment for {interaction.user.name}:**\n\n{reply}",
+        color=props["color"]
     )
-    embed.set_footer(text=f"{properties['prefix']} Pepe thinks you're awesome!")
-    await ctx.send(embed=embed)
-
-# Help command
-async def show_general_help(ctx):
-    embed = discord.Embed(
-        title="🐸 Pepe AI - Help Menu",
-        description="Explore all my powers! Commands are grouped by category for easy use.",
-        color=0x00FF7F
-    )
-
-    # --- AI Features ---
-    embed.add_field(
-        name="🤖 AI Features",
-        value=(
-            "**`!ask <question>`** — Ask anything, mood-based reply.\n"
-            "**`!image <prompt>`** — Generate AI art.\n"
-            "**`!quote [topic]`** — Inspirational quote.\n"
-            "**`!cite <topic>`** — Academic citation.\n"
-            "**`!compliment [topic]`** — Get a custom compliment."
-        ),
-        inline=False
-    )
-
-    # --- Fun Commands ---
-    embed.add_field(
-        name="🎉 Fun Commands",
-        value=(
-            "**`!ping`** — Check if I'm alive.\n"
-            "**`!joke`** — Get a random (bad) joke.\n"
-            "**`!invite`** — Get my invite link."
-        ),
-        inline=False
-    )
-
-    # --- Mood Management ---
-    embed.add_field(
-        name="📚 Mood Management",
-        value=(
-            "**`!setmood <mood>`** — Set your mood (happy, sad, angry, etc).\n"
-            "**`!resetmood`** — Reset to auto mood detection.\n"
-            "**`!mymood`** — Check your current mood."
-        ),
-        inline=False
-    )
-
-    # --- User Stats ---
-    embed.add_field(
-        name="📈 User Stats",
-        value=(
-            "**`!stats`** — See your usage stats."
-        ),
-        inline=False
-    )
-
-    # --- Utilities ---
-    embed.add_field(
-        name="🧹 Utilities",
-        value=(
-            "**`!clear`** — Clean all messages in the channel."
-        ),
-        inline=False
-    )
-
-    # --- Help ---
-    embed.add_field(
-        name="❓ Help",
-        value=(
-            "**`!help [command]`** — Show detailed help for a command."
-        ),
-        inline=False
-    )
-
-    embed.set_footer(text="🐸 Pepe AI | Use commands with ! | Made with ❤️")
-    await ctx.send(embed=embed)
+    embed.set_footer(text=f"{props['prefix']} Pepe thinks you're awesome!")
+    await interaction.followup.send(embed=embed)
 
 
-@bot.command()
-async def help(ctx, command_name: str = None):
+@bot.tree.command(name="help", description="📚 Get help with commands.")
+@app_commands.describe(command_name="(Optional) The command you want help with")
+async def help(interaction: discord.Interaction, command_name: str = None):
     if command_name:
-        command = bot.get_command(command_name.lower())
+        # Try to get the command from the app_commands tree
+        command = next((cmd for cmd in bot.tree.walk_commands() if cmd.name == command_name.lower()), None)
         if not command:
-            await ctx.send(f"🐸 Command `{command_name}` not found!")
+            await interaction.response.send_message(f"❌ Command `{command_name}` not found.", ephemeral=True)
             return
+
         embed = discord.Embed(
-            title=f"/{command.name}",
-            description=command.help or "No description available.",
+            title=f"🛠 Help: /{command.name}",
+            description=command.description or "No description available.",
             color=0x4d8000
         )
-        await ctx.send(embed=embed)
-    else:
-        await show_general_help(ctx)
 
-# ========== ERRORS ==========
+        if command.parameters:
+            args = "\n".join(
+                f"• `{p.name}`: {p.description or 'No description'}"
+                for p in command.parameters
+            )
+            embed.add_field(name="Arguments", value=args, inline=False)
 
-@image.error
-async def image_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("🎨 Please provide an image description! Example: `!image a cute frog`")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
     else:
-        await ctx.send(f"🐸 Ribbit! Something went wrong: {str(error)}")
+        # General help menu
+        embed = discord.Embed(
+            title="🐸 Pepe AI - Help Menu",
+            description="Here’s what I can do! Use `/` to see commands or scroll below.",
+            color=0x00FF7F
+        )
 
-@ask.error
-async def ask_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("💭 Please include your question! Example: `!ask why is the sky blue?`")
-    else:
-        await ctx.send(f"🐸 Hmm, I couldn't process that. Error: {str(error)}")
+        embed.add_field(
+            name="🤖 AI Features",
+            value=(
+                "`/ask` — Ask Pepe anything\n"
+                "`/image` — Generate AI art\n"
+                "`/quote` — Inspirational quote\n"
+                "`/cite` — Academic citation\n"
+                "`/compliment` — Custom compliment"
+            ),
+            inline=False
+        )
 
-@quote.error
-async def quote_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("📜 Please include your question! Example: `!quote motivation`")
+        embed.add_field(
+            name="🎉 Fun & Utility",
+            value=(
+                "`/ping` — Check if I'm alive\n"
+                "`/joke` — Get a random joke\n"
+                "`/invite` — Get my invite link"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="🎭 Mood Management",
+            value=(
+                "`/setmood` — Set your mood\n"
+                "`/resetmood` — Use auto-detection\n"
+                "`/mymood` — View current mood"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="📊 Stats",
+            value=(
+                "`/stats` — Your usage stats\n"
+                "`/serverstats` — Server-wide stats"
+            ),
+            inline=False
+        )
+
+        embed.set_footer(text="🐸 Pepe AI | Use `/help [command]` for detailed help")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+
+# ERRORS
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("🚫 You don't have permission to do that.", ephemeral=True)
+    elif isinstance(error, app_commands.CommandOnCooldown):
+        await interaction.response.send_message("⏳ That command is on cooldown. Try again later.", ephemeral=True)
+    elif isinstance(error, app_commands.MissingRequiredArgument):
+        await interaction.response.send_message("⚠️ Missing required argument.", ephemeral=True)
+    elif isinstance(error, app_commands.CommandInvokeError):
+        await interaction.response.send_message(f"💥 Something went wrong: `{error.original}`", ephemeral=True)
     else:
-        await ctx.send(f"🐸 Kwa! I couldn't get a quote. Error: {str(error)}")
+        await interaction.response.send_message("❌ An unexpected error occurred.", ephemeral=True)
+
 
 
 # Run bot

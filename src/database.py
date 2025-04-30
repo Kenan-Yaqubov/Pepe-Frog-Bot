@@ -21,7 +21,6 @@ def get_database():
         # Verify connection works
         client.admin.command('ping')
         db = client[DB_NAME]
-        print(f"Connected to MongoDB database '{DB_NAME}'")
         return db
     except Exception as e:
         print(f"Database connection failed: {str(e)}")
