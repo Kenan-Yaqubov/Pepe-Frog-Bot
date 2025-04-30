@@ -153,3 +153,5 @@ def get_quote(topic: str = None) -> str:
         return f'"{quote["q"]}" — {quote["a"]}'
     except Exception as e:
         return f"⚠️ Error fetching quote: {str(e)}"
+    
+

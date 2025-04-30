@@ -3,8 +3,9 @@ from discord.ext import commands
 from discord import app_commands
 import os
 from dotenv import load_dotenv
-from pymongo import MongoClient
 from openai_chat import get_joke, query_huggingface, mood, generate_image, get_citation, get_quote
+import time
+from collections import defaultdict
 import io
 
 from database import (
@@ -16,6 +17,19 @@ load_dotenv()
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+
+cooldowns = defaultdict(lambda: defaultdict(float))
+
+
+def is_on_cooldown(user_id, command_name, cooldown_seconds):
+    now = time.time()
+    if now < cooldowns[user_id][command_name]:
+        remaining = cooldowns[user_id][command_name] - now
+        return True, round(remaining, 1)
+    cooldowns[user_id][command_name] = now + cooldown_seconds
+    return False, 0
+
 
 MOOD_SETTINGS = {
     "happy": {"color": 0xFEE75C, "prefix": "🌟", "style": "upbeat and positive", "typing_emoji": "✍️"},
@@ -103,6 +117,10 @@ async def about(interaction: discord.Interaction):
 
 @bot.tree.command(name="ask", description="💬 Ask Pepe anything.")
 async def ask(interaction: discord.Interaction, question: str):
+    on_cooldown, seconds = is_on_cooldown(interaction.user.id, "ask", 10)
+    if on_cooldown:
+        await interaction.response.send_message(f"⏳ You're on cooldown. Try again in {seconds}s.", ephemeral=True)
+        return
     log_command_usage(interaction.user.id, "ask")
     user_mood = get_user_mood(interaction.user.id) or mood(question)
     props = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
@@ -119,6 +137,11 @@ async def ask(interaction: discord.Interaction, question: str):
 
 @bot.tree.command(name="image", description="🎨 Turn your words into AI art!")
 async def image(interaction: discord.Interaction, prompt: str):
+    on_cooldown, seconds = is_on_cooldown(interaction.user.id, "image", 10)
+    if on_cooldown:
+        await interaction.response.send_message(f"⏳ You're on cooldown. Try again in {seconds}s.", ephemeral=True)
+        return
+    
     log_command_usage(interaction.user.id, "image")
     await interaction.response.defer()
     image_data = await generate_image(prompt)
@@ -246,6 +269,26 @@ async def compliment(interaction: discord.Interaction, request: str = None):
     await interaction.followup.send(embed=embed)
 
 
+@bot.tree.command(name="explain", description="🧠 Get a clear explanation of any topic.")
+async def explain(interaction: discord.Interaction, topic: str):
+    log_command_usage(interaction.user.id, "explain")
+    user_mood = get_user_mood(interaction.user.id) or "neutral"
+    props = MOOD_SETTINGS.get(user_mood, MOOD_SETTINGS["neutral"])
+
+    await interaction.response.defer()
+    prompt = f"Explain in a {props['style']} tone: {topic}. Keep it clear and concise."
+    explanation = query_huggingface(prompt)
+
+    embed = discord.Embed(
+        title=f"{props['prefix']} Here's the explanation",
+        description=explanation[:2048],
+        color=props["color"]
+    )
+    embed.set_footer(text=f"🤖 Mood: {user_mood}")
+    await interaction.followup.send(embed=embed)
+
+
+
 @bot.tree.command(name="help", description="📚 Get help with commands.")
 @app_commands.describe(command_name="(Optional) The command you want help with")
 async def help(interaction: discord.Interaction, command_name: str = None):
@@ -277,7 +320,6 @@ async def help(interaction: discord.Interaction, command_name: str = None):
             description="Here’s what I can do! Use `/` to see commands or scroll below.",
             color=0x00FF7F
         )
-
         embed.add_field(
             name="🤖 AI Features",
             value=(
@@ -285,7 +327,8 @@ async def help(interaction: discord.Interaction, command_name: str = None):
                 "`/image` — Generate AI art\n"
                 "`/quote` — Inspirational quote\n"
                 "`/cite` — Academic citation\n"
-                "`/compliment` — Custom compliment"
+                "`/compliment` — Custom compliment\n"
+                "`/explain` — Explain any topic"
             ),
             inline=False
         )
@@ -336,6 +379,23 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         await interaction.response.send_message(f"💥 Something went wrong: `{error.original}`", ephemeral=True)
     else:
         await interaction.response.send_message("❌ An unexpected error occurred.", ephemeral=True)
+
+
+# AUTO COMPLETES
+
+@setmood.autocomplete("mood_type")
+async def mood_autocomplete(interaction: discord.Interaction, current: str):
+    moods = [m for m in MOOD_SETTINGS if current.lower() in m]
+    return [app_commands.Choice(name=m, value=m) for m in moods]
+
+
+@help.autocomplete("command_name")
+async def help_autocomplete(interaction: discord.Interaction, current: str):
+    matches = [
+        cmd.name for cmd in bot.tree.walk_commands()
+        if current.lower() in cmd.name
+    ]
+    return [app_commands.Choice(name=name, value=name) for name in matches[:25]]
 
 
 
